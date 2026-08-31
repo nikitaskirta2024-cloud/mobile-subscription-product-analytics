@@ -4,17 +4,17 @@
 -- Experiment: onboarding_flow_v2
 -- ============================================================
 
--- Experimental groups are defined by experiment assignment (ITT).
--- Users with conflicting variant assignments were already excluded
--- in experiment_assignments_clean.
+-- Intention-to-treat (ITT) analysis.
+-- Experiment groups are defined by assignment.
+-- Conflicting variant assignments are excluded upstream.
 --
 -- Primary metric:
 --   onboarding completion
 --
 -- Secondary / guardrail metrics:
---   trial start
---   paid conversion
---   D1 / D7 / D30 retention
+--   trial start within 7 days of assignment
+--   paid conversion within 14 days of assignment
+--   exact-calendar D1 / D7 / D30 retention
 
 
 WITH experiment_users AS (
@@ -28,8 +28,8 @@ WITH experiment_users AS (
 
 data_window AS (
     SELECT
-        MAX(DATE(event_ts)) AS data_end_date
-    FROM `project-4-507020.1.events_user_level`
+        TIMESTAMP('2025-08-15 23:59:59+00') AS data_end_ts,
+        DATE('2025-08-15') AS data_end_date
 ),
 
 onboarding AS (
@@ -76,105 +76,140 @@ app_open_days AS (
         DATE(event_ts) AS activity_date
     FROM `project-4-507020.1.events_user_level`
     WHERE event_name = 'app_open'
-),
-
-user_level AS (
-    SELECT
-        x.user_id,
-        x.variant,
-        x.assigned_at,
-        u.signup_ts,
-        dw.data_end_date,
-
-        CASE
-            WHEN o.onboarding_ts IS NOT NULL THEN 1
-            ELSE 0
-        END AS onboarding_completed,
-
-        CASE
-            WHEN t.trial_ts IS NOT NULL THEN 1
-            ELSE 0
-        END AS trial_started,
-
-        CASE
-            WHEN p.paid_ts IS NOT NULL THEN 1
-            ELSE 0
-        END AS paid_conversion,
-
-        CASE
-            WHEN DATE(u.signup_ts)
-                 <= DATE_SUB(dw.data_end_date, INTERVAL 1 DAY)
-            THEN 1 ELSE 0
-        END AS d1_eligible,
-
-        CASE
-            WHEN DATE(u.signup_ts)
-                 <= DATE_SUB(dw.data_end_date, INTERVAL 1 DAY)
-             AND EXISTS (
-                SELECT 1
-                FROM app_open_days a
-                WHERE a.user_id = x.user_id
-                  AND a.activity_date =
-                      DATE_ADD(DATE(u.signup_ts), INTERVAL 1 DAY)
-             )
-            THEN 1 ELSE 0
-        END AS d1_retained,
-
-        CASE
-            WHEN DATE(u.signup_ts)
-                 <= DATE_SUB(dw.data_end_date, INTERVAL 7 DAY)
-            THEN 1 ELSE 0
-        END AS d7_eligible,
-
-        CASE
-            WHEN DATE(u.signup_ts)
-                 <= DATE_SUB(dw.data_end_date, INTERVAL 7 DAY)
-             AND EXISTS (
-                SELECT 1
-                FROM app_open_days a
-                WHERE a.user_id = x.user_id
-                  AND a.activity_date =
-                      DATE_ADD(DATE(u.signup_ts), INTERVAL 7 DAY)
-             )
-            THEN 1 ELSE 0
-        END AS d7_retained,
-
-        CASE
-            WHEN DATE(u.signup_ts)
-                 <= DATE_SUB(dw.data_end_date, INTERVAL 30 DAY)
-            THEN 1 ELSE 0
-        END AS d30_eligible,
-
-        CASE
-            WHEN DATE(u.signup_ts)
-                 <= DATE_SUB(dw.data_end_date, INTERVAL 30 DAY)
-             AND EXISTS (
-                SELECT 1
-                FROM app_open_days a
-                WHERE a.user_id = x.user_id
-                  AND a.activity_date =
-                      DATE_ADD(DATE(u.signup_ts), INTERVAL 30 DAY)
-             )
-            THEN 1 ELSE 0
-        END AS d30_retained
-
-    FROM experiment_users x
-
-    JOIN `project-4-507020.1.users` u
-        ON x.user_id = u.user_id
-
-    CROSS JOIN data_window dw
-
-    LEFT JOIN onboarding o
-        ON x.user_id = o.user_id
-
-    LEFT JOIN trial t
-        ON x.user_id = t.user_id
-
-    LEFT JOIN paid p
-        ON x.user_id = p.user_id
 )
 
-SELECT *
-FROM user_level
-ORDER BY variant, user_id;
+SELECT
+    x.user_id,
+    x.variant,
+    x.assigned_at,
+    u.signup_ts,
+    dw.data_end_date,
+
+    -- Primary metric
+    IF(o.onboarding_ts IS NOT NULL, 1, 0)
+        AS onboarding_completed,
+
+    -- Trial: 7-day observation window
+    IF(
+        x.assigned_at <= TIMESTAMP_SUB(
+            dw.data_end_ts,
+            INTERVAL 7 DAY
+        ),
+        1,
+        0
+    ) AS trial_eligible,
+
+    IF(
+        t.trial_ts BETWEEN
+            x.assigned_at
+            AND TIMESTAMP_ADD(x.assigned_at, INTERVAL 7 DAY),
+        1,
+        0
+    ) AS trial_started,
+
+    -- Paid conversion: 14-day observation window
+    IF(
+        x.assigned_at <= TIMESTAMP_SUB(
+            dw.data_end_ts,
+            INTERVAL 14 DAY
+        ),
+        1,
+        0
+    ) AS paid_eligible,
+
+    IF(
+        p.paid_ts BETWEEN
+            x.assigned_at
+            AND TIMESTAMP_ADD(x.assigned_at, INTERVAL 14 DAY),
+        1,
+        0
+    ) AS paid_conversion,
+
+    -- D1 retention
+    IF(
+        DATE(u.signup_ts)
+            <= DATE_SUB(dw.data_end_date, INTERVAL 1 DAY),
+        1,
+        0
+    ) AS d1_eligible,
+
+    IF(
+        EXISTS (
+            SELECT 1
+            FROM app_open_days a
+            WHERE a.user_id = x.user_id
+              AND a.activity_date =
+                  DATE_ADD(
+                      DATE(u.signup_ts),
+                      INTERVAL 1 DAY
+                  )
+        ),
+        1,
+        0
+    ) AS d1_retained,
+
+    -- D7 retention
+    IF(
+        DATE(u.signup_ts)
+            <= DATE_SUB(dw.data_end_date, INTERVAL 7 DAY),
+        1,
+        0
+    ) AS d7_eligible,
+
+    IF(
+        EXISTS (
+            SELECT 1
+            FROM app_open_days a
+            WHERE a.user_id = x.user_id
+              AND a.activity_date =
+                  DATE_ADD(
+                      DATE(u.signup_ts),
+                      INTERVAL 7 DAY
+                  )
+        ),
+        1,
+        0
+    ) AS d7_retained,
+
+    -- D30 retention
+    IF(
+        DATE(u.signup_ts)
+            <= DATE_SUB(dw.data_end_date, INTERVAL 30 DAY),
+        1,
+        0
+    ) AS d30_eligible,
+
+    IF(
+        EXISTS (
+            SELECT 1
+            FROM app_open_days a
+            WHERE a.user_id = x.user_id
+              AND a.activity_date =
+                  DATE_ADD(
+                      DATE(u.signup_ts),
+                      INTERVAL 30 DAY
+                  )
+        ),
+        1,
+        0
+    ) AS d30_retained
+
+FROM experiment_users x
+
+JOIN `project-4-507020.1.users` u
+    ON x.user_id = u.user_id
+
+CROSS JOIN data_window dw
+
+LEFT JOIN onboarding o
+    ON x.user_id = o.user_id
+
+LEFT JOIN trial t
+    ON x.user_id = t.user_id
+
+LEFT JOIN paid p
+    ON x.user_id = p.user_id
+
+ORDER BY
+    x.variant,
+    x.user_id;
