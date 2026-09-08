@@ -1,4 +1,4 @@
-<img width="1237" height="1013" alt="image" src="https://github.com/user-attachments/assets/e7be6087-d5d1-468d-bc35-7b4c2a62e370" /># Mobile Subscription Product Analytics
+# Mobile Subscription Product Analytics
 
 Product analytics portfolio case study for a mobile subscription app.
 
