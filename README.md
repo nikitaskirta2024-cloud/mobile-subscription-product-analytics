@@ -1,6 +1,8 @@
-# Mobile Subscription Product Analytics
+<img width="1237" height="1013" alt="image" src="https://github.com/user-attachments/assets/e7be6087-d5d1-468d-bc35-7b4c2a62e370" /># Mobile Subscription Product Analytics
 
 Product analytics portfolio case study for a mobile subscription app.
+
+[**View Interactive Tableau Dashboard**](https://public.tableau.com/app/profile/nikita.sergeevich/viz/Project4_MobileSubscriptionProductAnalytics/ProductAnalyticsDashboard)
 
 The project investigates the complete new-user journey from registration to paid subscription, identifies funnel bottlenecks, compares user segments, measures cohort retention and monetization, and evaluates an onboarding A/B test.
 
@@ -22,15 +24,15 @@ The product team wants to understand:
 
 ---
 
-## Dataset
+### Data Model
 
-The analysis uses five core tables:
-
-- `users` — registration and user attributes
-- `events` — product behavior and app activity
-- `subscriptions` — trial and subscription lifecycle
-- `payments` — charges and refunds
-- `experiment_assignments` — A/B test allocation
+| Table | Grain | Primary Key | Main Relationships |
+|---|---|---|---|
+| `users` | One row per registered user | `user_id` | Base entity for events, subscriptions, payments and experiments |
+| `events` | One row per product event | `event_id` | `user_id` → `users`; `anonymous_id` used for identity recovery |
+| `subscriptions` | One row per subscription | `subscription_id` | `user_id` → `users` |
+| `payments` | One row per payment transaction | `payment_id` | `user_id` → `users`; `subscription_id` → `subscriptions` |
+| `experiment_assignments` | One row per experiment assignment record | `assignment_id` | `user_id` → `users` |
 
 Dataset scale:
 
