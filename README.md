@@ -24,6 +24,8 @@ The product team wants to understand:
 
 ---
 
+## Dataset
+
 ### Data Model
 
 | Table | Grain | Primary Key | Main Relationships |
